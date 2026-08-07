@@ -1,19 +1,23 @@
 #!/usr/bin/env node
 
-const path = require('path');
-const storeIo = require('./lib/store/io.cjs');
-const storeAccounts = require('./lib/store/accounts.cjs');
-const outputAccounts = require('./lib/output/accounts.cjs');
-const outputMessages = require('./lib/output/messages.cjs');
-const syncAction = require('./lib/actions/sync.cjs');
-const removeAction = require('./lib/actions/remove.cjs');
-const listAction = require('./lib/actions/list.cjs');
-const switchAction = require('./lib/actions/switch.cjs');
-const renameAction = require('./lib/actions/rename.cjs');
-const authGuard = require('./lib/auth/guard.cjs');
-const authRefresh = require('./lib/auth/refresh.cjs');
-const authIdentity = require('./lib/auth/identity.cjs');
-const procSessions = require('./lib/proc/sessions.cjs');
+const path = require("path");
+const storeIo = require("./lib/store/io.cjs");
+const storeAccounts = require("./lib/store/accounts.cjs");
+const outputAccounts = require("./lib/output/accounts.cjs");
+const outputMessages = require("./lib/output/messages.cjs");
+const syncAction = require("./lib/actions/sync.cjs");
+const removeAction = require("./lib/actions/remove.cjs");
+const listAction = require("./lib/actions/list.cjs");
+const switchAction = require("./lib/actions/switch.cjs");
+const renameAction = require("./lib/actions/rename.cjs");
+const authGuard = require("./lib/auth/guard.cjs");
+const authRefresh = require("./lib/auth/refresh.cjs");
+const authIdentity = require("./lib/auth/identity.cjs");
+const procSessions = require("./lib/proc/sessions.cjs");
+const usageFetch = require("./lib/usage/fetch.cjs");
+const usageFormat = require("./lib/usage/format.cjs");
+const usageCache = require("./lib/usage/cache.cjs");
+const usageAction = require("./lib/actions/usage.cjs");
 
 const {
   getDefaultOauthTokenPath,
@@ -24,6 +28,7 @@ const {
   readLiveState,
   writeLiveState,
   writeStore,
+  ensureDir,
 } = storeIo;
 
 const {
@@ -32,6 +37,7 @@ const {
   syncStoreFromLive,
   findSelection,
   removeStoredAccount,
+  getAccountKey,
 } = storeAccounts;
 
 const getEntryLabelUi = outputAccounts.getEntryLabel;
@@ -49,16 +55,20 @@ const runRemoveAction = removeAction.runRemoveAction;
 const runListAction = listAction.runListAction;
 const runSwitchAction = switchAction.runSwitchAction;
 const runRenameAction = renameAction.runRenameAction;
+const runUsageAction = usageAction.runUsageAction;
 
-const STORE_VERSION = '0.2.0';
+const STORE_VERSION = "0.2.0";
 
-function formatAccountSummary(items) {
-  return formatAccountSummaryUi(items, { formatRelativeTime: formatRelativeTimeUi });
+function formatAccountSummary(items, opts = {}) {
+  return formatAccountSummaryUi(items, {
+    formatRelativeTime: formatRelativeTimeUi,
+    getUsageColumns: opts.showUsage ? usageFormat.getUsageColumns : null,
+  });
 }
 
-function parseArgs(argv) {
+function parseArgs(argv, settings) {
   const options = {
-    usageCommand: 'ag-switch',
+    usageCommand: "ag-switch",
     oauthTokenPath: getDefaultOauthTokenPath(),
     storePath: getDefaultStorePath(),
     backupDir: getDefaultBackupDir(),
@@ -69,7 +79,12 @@ function parseArgs(argv) {
     renameOnly: false,
     renameIndex: null,
     renameAliasParts: [],
-    selector: '',
+    usageOnly: false,
+    // Usage/quota display hits an undocumented, reverse-engineered Google
+    // endpoint (see lib/usage/fetch.cjs) - default on but always best-effort,
+    // never blocking, and user-toggleable via --show-usage/--hide-usage.
+    showUsage: settings ? settings.showUsage !== false : true,
+    selector: "",
     // Test-only escape hatch: skip the real Google userinfo network call and
     // use a fixed identity instead. Not documented as user-facing.
     liveIdentityOverride: null,
@@ -78,40 +93,56 @@ function parseArgs(argv) {
   const args = [...argv];
   while (args.length > 0) {
     const current = args.shift();
-    if (current === '--usage-command') {
+    if (current === "--usage-command") {
       options.usageCommand = args.shift() || options.usageCommand;
       continue;
     }
-    if (current === '--oauth-token') {
+    if (current === "--oauth-token") {
       options.oauthTokenPath = args.shift() || options.oauthTokenPath;
       continue;
     }
-    if (current === '--live-identity') {
-      options.liveIdentityOverride = JSON.parse(args.shift() || '{}');
+    if (current === "--live-identity") {
+      options.liveIdentityOverride = JSON.parse(args.shift() || "{}");
       continue;
     }
-    if (current === '--store') {
+    if (current === "--store") {
       options.storePath = args.shift() || options.storePath;
       continue;
     }
-    if (current === '--backup-dir') {
+    if (current === "--backup-dir") {
       options.backupDir = args.shift() || options.backupDir;
       continue;
     }
-    if (current === '--sync' || current === 'sync') {
+    if (current === "--sync" || current === "sync") {
       options.syncOnly = true;
       continue;
     }
-    if (current === '--touch-current') {
+    if (current === "--touch-current") {
       options.touchCurrentOnly = true;
       continue;
     }
-    if (current === '--remove' || current === 'remove') {
+    if (current === "--remove" || current === "remove") {
       options.removeOnly = true;
       continue;
     }
-    if (current === '--rename' || current === 'rename') {
+    if (current === "--rename" || current === "rename") {
       options.renameOnly = true;
+      continue;
+    }
+    if (current === "--usage" || current === "usage") {
+      options.usageOnly = true;
+      continue;
+    }
+    if (current === "--show-usage") {
+      options.showUsage = true;
+      usageCache.writeSettings({ showUsage: true }, ensureDir);
+      console.log("Usage display enabled.");
+      continue;
+    }
+    if (current === "--hide-usage") {
+      options.showUsage = false;
+      usageCache.writeSettings({ showUsage: false }, ensureDir);
+      console.log("Usage display disabled.");
       continue;
     }
     if (options.removeOnly && options.removeIndex === null) {
@@ -142,34 +173,54 @@ function parseArgs(argv) {
 }
 
 async function main() {
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseArgs(process.argv.slice(2), usageCache.readSettings());
+  const formatAccountSummaryWithUsage = (items) =>
+    formatAccountSummary(items, { showUsage: options.showUsage });
 
   try {
     const liveState = readLiveState(options);
     // The live account's identity cannot be read from a local file -
     // google_accounts.json/google_account_id were tested and don't track
     // the real login state. Resolve it against Google directly instead.
-    liveState.identity = options.liveIdentityOverride
-      || await authIdentity.fetchLiveIdentity(liveState.oauthToken?.token?.access_token);
+    liveState.identity =
+      options.liveIdentityOverride ||
+      (await authIdentity.fetchLiveIdentity(
+        liveState.oauthToken?.token?.access_token,
+      ));
 
-    const existingStore = normalizeStore(readJsonIfExists(options.storePath, { version: STORE_VERSION, accounts: [] }), STORE_VERSION);
+    const existingStore = normalizeStore(
+      readJsonIfExists(options.storePath, {
+        version: STORE_VERSION,
+        accounts: [],
+      }),
+      STORE_VERSION,
+    );
 
     if (options.syncOnly) {
-      runSyncAction(existingStore, liveState, {
+      await runSyncAction(existingStore, liveState, {
         syncStoreFromLive,
         deepCopy,
         storeVersion: STORE_VERSION,
         writeStore,
         options,
         path,
+        fetchUsage: usageFetch.fetchUsage,
+        formatUsageDetail: usageFormat.formatUsageDetail,
       });
       return;
     }
 
     if (options.touchCurrentOnly) {
-      const syncedTouch = syncStoreFromLive(existingStore, liveState, deepCopy, STORE_VERSION);
+      const syncedTouch = syncStoreFromLive(
+        existingStore,
+        liveState,
+        deepCopy,
+        STORE_VERSION,
+      );
       const storeTouch = syncedTouch.store;
-      const idx = storeTouch.accounts.findIndex((e) => e.key === syncedTouch.key);
+      const idx = storeTouch.accounts.findIndex(
+        (e) => e.key === syncedTouch.key,
+      );
       if (idx >= 0) {
         storeTouch.accounts[idx].lastUsedAt = new Date().toISOString();
       }
@@ -189,25 +240,51 @@ async function main() {
     }
 
     if (options.renameOnly) {
-      runRenameAction(existingStore, options.renameIndex, options.renameAliasParts.join(' '), {
-        writeStore,
-        options,
-        liveState,
-        getEntryLabel: getEntryLabelUi,
-        getDisplayAccounts,
-        getStoredAccountsHeading,
-        formatAccountSummary,
-      });
+      runRenameAction(
+        existingStore,
+        options.renameIndex,
+        options.renameAliasParts.join(" "),
+        {
+          writeStore,
+          options,
+          liveState,
+          getEntryLabel: getEntryLabelUi,
+          getDisplayAccounts,
+          getStoredAccountsHeading,
+          formatAccountSummary: formatAccountSummaryWithUsage,
+        },
+      );
       return;
     }
 
-    const synced = syncStoreFromLive(existingStore, liveState, deepCopy, STORE_VERSION);
+    const synced = syncStoreFromLive(
+      existingStore,
+      liveState,
+      deepCopy,
+      STORE_VERSION,
+    );
     if (synced.warning) {
       console.log(outputMessages.getSyncSkippedWarning(synced.warning));
     }
     const store = synced.store;
-    const currentMetadata = { sub: liveState.identity.sub, emailAddress: liveState.identity.email };
+    const currentMetadata = {
+      sub: liveState.identity.sub,
+      emailAddress: liveState.identity.email,
+    };
     const accounts = getDisplayAccounts(store, currentMetadata);
+
+    if (options.usageOnly) {
+      await runUsageAction({
+        store,
+        currentKey: getAccountKey(currentMetadata),
+        fetchUsage: usageFetch.fetchUsage,
+        formatUsageDetail: usageFormat.formatUsageDetail,
+        refreshStoredUsageSnapshots: usageFormat.refreshStoredUsageSnapshots,
+        writeStore,
+        options,
+      });
+      return;
+    }
 
     if (!options.selector) {
       await runListAction({
@@ -216,11 +293,15 @@ async function main() {
         liveState,
         options,
         writeStore,
-        formatAccountSummary,
+        formatAccountSummary: formatAccountSummaryWithUsage,
         getDisplayAccounts,
         getListGuidance,
         getAvailableAccountsHeading,
         path,
+        refreshStoredUsageSnapshots: usageFormat.refreshStoredUsageSnapshots,
+        fetchUsage: usageFetch.fetchUsage,
+        getAccountKey,
+        formatUsageDetail: usageFormat.formatUsageDetail,
       });
       return;
     }
@@ -242,7 +323,10 @@ async function main() {
       getEntryLabel: getEntryLabelUi,
       getRestartNotice,
       getStoredAccountsHeading,
-      formatAccountSummary,
+      formatAccountSummary: formatAccountSummaryWithUsage,
+      refreshStoredUsageSnapshots: usageFormat.refreshStoredUsageSnapshots,
+      fetchUsage: usageFetch.fetchUsage,
+      getAccountKey,
     });
   } catch (error) {
     console.log(`Switch failed: ${error.message}`);

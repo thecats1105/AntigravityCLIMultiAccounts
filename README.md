@@ -3,31 +3,32 @@
 [![npm version](https://img.shields.io/npm/v/antigravity-cli-multi-accounts?label=npm)](https://www.npmjs.com/package/antigravity-cli-multi-accounts)
 [![npm downloads](https://img.shields.io/npm/dm/antigravity-cli-multi-accounts)](https://www.npmjs.com/package/antigravity-cli-multi-accounts)
 
-This project installs a local workaround for switching Google [Antigravity CLI](https://antigravity.google/)
-(`agy`) accounts. Antigravity CLI has no native multi-account, login, or logout command - switching
-Google accounts today means fully re-authenticating through the browser every time. This tool keeps
-account snapshots in `~/.AntigravityCLIMultiAccounts.json` and writes only the active account's oauth
-token back into `agy`'s live credential file when switching.
+This project installs a local workaround for switching Google [Antigravity CLI](https://antigravity.google/) (`agy`) accounts by keeping account snapshots in `~/.AntigravityCLIMultiAccounts.json` and writing only the active account's oauth token back into `agy`'s live credential file when switching.
 
 Supported user-facing commands:
+
 - `ag-switch`
 - `ag-switch <index>`
 - `ag-switch --rename <index> [name]`
 - `ag-switch --remove <index>`
+- `ag-switch usage`
+- `ag-switch --show-usage` / `ag-switch --hide-usage`
 - `ag-sync-oauth`
 - `ags` (short alias for `ag-switch`)
 - `agso` (short alias for `ag-sync-oauth`)
 
 Supported environments:
+
 - Windows (PowerShell/CMD/Git Bash)
 - Ubuntu WSL
 - Native macOS/Linux with Node.js
 
 Prerequisites:
+
 - Node.js 18+
 - Antigravity CLI (`agy`) already installed and logged in at least once
 
-## Install
+Install:
 
 **Recommended (via npm):**
 
@@ -45,16 +46,15 @@ cd AntigravityCLIMultiAccounts
 ```
 
 What install does:
-- only runs if `~/.gemini/antigravity-cli` is detected on the machine (i.e. `agy` has been used at
-  least once); otherwise it prints a message and exits without doing anything
+
+- only runs if `~/.gemini/antigravity-cli` is detected (i.e. `agy` has been used at least once)
 - copies the Node CLI into `~/.gemini/multi-account-switch/bin`
 - installs `ag-switch`, `ag-sync-oauth`, `ags`, and `agso` wrapper commands
 - keeps stored account snapshots in `~/.AntigravityCLIMultiAccounts.json`
-- merges a `SessionStart` hook into `~/.gemini/config/hooks.json` (any other hook groups already
-  registered there are left untouched)
+- merges a `SessionStart` hook into `~/.gemini/config/hooks.json` (other hook groups are left untouched)
 - creates backups under `~/.gemini/multi-account-switch/backups`
 
-## Uninstall
+Uninstall:
 
 **Recommended (via npm):**
 
@@ -72,13 +72,14 @@ npx antigravity-cli-multi-accounts uninstall
 ./uninstall.sh    # macOS / Linux / WSL
 ```
 
-## Usage
+Usage:
 
 ```bash
 ag-switch
 ag-switch 1
 ag-switch --rename 1 Personal
 ag-switch --rename 1
+ag-switch usage
 ag-sync-oauth
 ags
 agso
@@ -92,9 +93,17 @@ Example shell output:
 
 ```text
 $ ag-switch
+--- Usage ---
+Gemini:
+  5h remaining/reset: 98.7% / 8/8/2026, 4:30:42 AM
+  7d remaining/reset: 99.5% / 8/14/2026, 3:43:50 PM
+Other(Claude/GPT):
+  5h remaining/reset: 100.0% / 8/8/2026, 5:10:19 AM
+  7d remaining/reset: 100.0% / 8/15/2026, 12:10:19 AM
+
 Available Antigravity accounts:
-  [0] alex.work <alex.work@example.invalid> | used:6m ago
-* [1] alex.personal <alex.personal@example.invalid> | used:just now
+  [0] alex.work <alex.work@example.invalid> | Gemini 5H:82% (~4h 29min) / Other 5H:40% (~4h 29min) | Gemini 7D:60% (6D 15h) / Other 7D:10% (2D 4h) | used:6m ago
+* [1] alex.personal <alex.personal@example.invalid> | Gemini 5H:99% (~4h 12min) / Other 5H:100% (~5h 0min) | Gemini 7D:99% (6D 15h) / Other 7D:100% (7D 0h) | used:just now
 
 Run ag-switch <index> to make one of these stored entries the active Antigravity account.
 Run ag-switch --remove <index> to remove a stored account.
@@ -111,7 +120,16 @@ Stored account list:
   [1] alex.personal <alex.personal@example.invalid> | used:6m ago
 ```
 
+Output columns:
+
+- `5H`/`7D`: remaining quota and reset estimate for the 5-hour and weekly windows, shown as `Gemini
+... / Other ...` since Gemini and Claude/GPT calls draw from separate quotas
+- `used`: when the account was last selected, or when the `SessionStart` hook last refreshed it
+- Top `--- Usage ---` block: the current account's exact usage, fetched live when available
+- `ag-switch --hide-usage` turns all of this off (persisted); `ag-switch --show-usage` turns it back on
+
 Platform notes:
+
 - Windows installs `ag-switch.cmd` and `ag-sync-oauth.cmd` into `~/bin`, plus Git Bash-friendly
   `ag-switch` and `ag-sync-oauth` wrappers in the same directory.
 - Short aliases `ags` and `agso` are installed alongside the full command names.
@@ -119,51 +137,41 @@ Platform notes:
 - WSL also uses the Unix shell wrappers.
 - If a shell says `command not found` right after install, restart the shell or run `hash -r` once.
 
-## Behavior notes
+Behavior notes:
 
-- Stored account snapshots live in `~/.AntigravityCLIMultiAccounts.json`, keyed by the Google
-  account's stable `sub` id (fetched from Google's userinfo endpoint) - the closest analog to an
-  account UUID Google exposes for this.
-- Switching only writes one live file: `~/.gemini/antigravity-cli/antigravity-oauth-token`. Two other
-  files were originally assumed to also carry account identity -
-  `~/.gemini/google_accounts.json` (an `active` email field) and `~/.gemini/google_account_id` - but a
-  real second-account login test showed **both stay stale and don't track the actual live login**, so
-  they are deliberately left untouched. Every `sync`/`list`/`switch` instead calls
-  `https://www.googleapis.com/oauth2/v3/userinfo` with the live access token to reliably determine
-  which account it belongs to. This means those commands require network access.
-- It never touches `~/.gemini/antigravity-cli/settings.json`, conversation history, caches, or brain
-  files - only the oauth token.
+- Stored account snapshots are keyed by the Google account's stable `sub` id (fetched from Google's
+  userinfo endpoint) rather than email, since `~/.gemini/google_accounts.json` and
+  `~/.gemini/google_account_id` were tested and don't reliably track the active login.
+- Switching only writes one live file: `~/.gemini/antigravity-cli/antigravity-oauth-token`. It never
+  touches settings, conversation history, caches, or brain files.
 - It creates backups before writing the live file or the store file (latest 3 kept per file).
 - The `SessionStart` hook refreshes the "last used" timestamp and prints a reminder at the start of
   each `agy` session.
-- Token refresh before restoring a stale account is attempted best-effort. Unlike a naive
-  implementation, a failed refresh does **not** abort the switch - it restores the stored token as-is
-  and warns, since the refresh implementation itself is unverified (see Warnings below).
+- Token refresh before restoring a stale account is best-effort - a failed refresh does not abort the
+  switch, it restores the stored token as-is and warns (see Warnings).
+- Usage display calls `cloudcode-pa.googleapis.com`'s quota-summary endpoint, the same private API
+  `agy` itself uses. It's always best-effort and never blocks `list`/`switch`/`sync`.
 
-## Warnings
+Warnings:
 
 - This is a local workaround, not an official Google/Antigravity tool.
-- Proactive OAuth token refresh uses `https://oauth2.googleapis.com/token` with an OAuth client id
-  recovered from strings in the `agy`/`antigravity` binary; there is no confirmation this client id
-  (or the lack of a client secret) actually works for a refresh grant. Treat refresh failures as
-  expected until this is verified - the switch still proceeds using the unrefreshed token.
-- No usage/quota display - there's no known public equivalent of a per-account quota API for
-  Antigravity/Cloud Code Assist.
-- No slash-command (`/ag-switch`) support - `agy`'s slash commands appear to route through its
-  `skills/` system rather than a flat command directory, and this hasn't been investigated yet.
+- Proactive OAuth token refresh uses an OAuth client id recovered from the `agy` binary; whether it
+  actually works for a refresh grant is unverified. The switch still proceeds on a refresh failure.
+- Usage display uses an undocumented, reverse-engineered endpoint found via `strings` on the `agy`
+  binary. The response shape was confirmed against a real account, but Google could change it at any
+  time; if that happens the usage columns just stop appearing rather than erroring.
+- No slash-command (`/ag-switch`) support - `agy`'s slash commands route through its `skills/` system
+  rather than a flat command directory.
 - Windows/macOS are untested for the live-file swap. On Linux/WSL, `agy` falls back to file-based
-  token storage when the OS keyring is unavailable (confirmed on this project's dev machine); on
-  macOS/Windows the keyring may succeed instead, which could make the live file this tool watches
-  stale or unused. If that turns out to be the case, this tool would need to shell out to the native
-  keyring (Keychain/Credential Manager) instead of/in addition to the file above.
+  token storage when the OS keyring is unavailable; on macOS/Windows the keyring may succeed instead,
+  which could make the live file this tool watches stale or unused.
 
-## Credits
+Credits:
 
-This project's architecture (account snapshot store, atomic file writes with backups, single-active-account
-swap model, hook-based session reminders) is ported from
-[**Leuconoe/ClaudeCodeMultiAccounts**](https://github.com/Leuconoe/ClaudeCodeMultiAccounts), the
-original Claude Code multi-account switcher. All credit for that design goes to its author -
-this project just retargets the same approach at Google Antigravity CLI.
+This project's architecture (account snapshot store, atomic file writes with backups,
+single-active-account swap model, hook-based session reminders) is ported from
+[Leuconoe/ClaudeCodeMultiAccounts](https://github.com/Leuconoe/ClaudeCodeMultiAccounts), the original
+Claude Code multi-account switcher. All credit for that design goes to its author.
 
 ## Star History
 

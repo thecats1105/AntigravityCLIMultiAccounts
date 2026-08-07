@@ -1,6 +1,6 @@
 {
   "name": "antigravity-cli-multi-accounts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Installer and CLI for switching Google Antigravity CLI (agy) accounts across Windows, WSL, and Unix shells.",
   "license": "MIT",
   "type": "commonjs",
@@ -26,9 +26,13 @@
     "lib/actions/list.cjs",
     "lib/actions/remove.cjs",
     "lib/actions/rename.cjs",
+    "lib/actions/usage.cjs",
     "lib/output/accounts.cjs",
     "lib/output/messages.cjs",
     "lib/proc/sessions.cjs",
+    "lib/usage/fetch.cjs",
+    "lib/usage/format.cjs",
+    "lib/usage/cache.cjs",
     "README.md",
     "uninstall.cjs",
     "uninstall.cmd",
@@ -56,6 +60,6 @@
   },
   "scripts": {
     "pack:check": "npm pack --dry-run",
-    "test": "node --test tests/guard.test.cjs tests/refresh.test.cjs tests/identity.test.cjs tests/io.test.cjs tests/accounts.test.cjs tests/pipeline.test.cjs tests/cli-switch.test.cjs"
+    "test": "node --test tests/guard.test.cjs tests/refresh.test.cjs tests/identity.test.cjs tests/io.test.cjs tests/accounts.test.cjs tests/pipeline.test.cjs tests/cli-switch.test.cjs tests/usage-fetch.test.cjs tests/usage-format.test.cjs"
   }
 }
