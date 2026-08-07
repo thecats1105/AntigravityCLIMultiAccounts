@@ -11,54 +11,40 @@ const messages = require('../lib/output/messages.cjs');
 const NOW = Date.now();
 
 function makeFixtures() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-switch-pipeline-test-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-switch-pipeline-test-'));
   const options = {
-    usageCommand: '/switch',
-    configPath: path.join(dir, '.claude.json'),
-    credentialsPath: path.join(dir, '.credentials.json'),
+    oauthTokenPath: path.join(dir, 'antigravity-oauth-token'),
     storePath: path.join(dir, 'store.json'),
     backupDir: path.join(dir, 'backups'),
   };
 
-  const config = { oauthAccount: { accountUuid: 'uuid-a', emailAddress: 'a@test.com' }, keep: true };
-  const liveCredentials = {
-    claudeAiOauth: { accessToken: 'live-a', refreshToken: 'live-refresh-a', expiresAt: NOW + 3600000 },
-    sibling: 'must-survive',
-  };
+  const liveOauthToken = { auth_method: 'consumer', token: { access_token: 'live-a', refresh_token: 'live-refresh-a', expiry: new Date(NOW + 3600000).toISOString() } };
   const expiredSlot = {
-    key: 'uuid:uuid-b',
+    key: 'sub:sub-b',
     index: 0,
-    metadata: { accountUuid: 'uuid-b', emailAddress: 'b@test.com' },
+    metadata: { sub: 'sub-b', emailAddress: 'b@test.com' },
     credentials: {
-      claudeAiOauth: {
-        accessToken: 'stale-access-b',
-        refreshToken: 'stale-refresh-b',
-        expiresAt: NOW - 3600000,
-        refreshTokenExpiresAt: NOW + 86400000,
-        subscriptionType: 'max',
-      },
+      oauthToken: { auth_method: 'consumer', token: { access_token: 'stale-access-b', refresh_token: 'stale-refresh-b', expiry: new Date(NOW - 3600000).toISOString() } },
     },
   };
-  const store = { version: '0.2.9', accounts: [JSON.parse(JSON.stringify(expiredSlot))] };
+  const store = { version: '0.2.0', accounts: [JSON.parse(JSON.stringify(expiredSlot))] };
 
-  fs.writeFileSync(options.configPath, JSON.stringify(config, null, 2), 'utf8');
-  fs.writeFileSync(options.credentialsPath, JSON.stringify(liveCredentials, null, 2), 'utf8');
+  fs.writeFileSync(options.oauthTokenPath, JSON.stringify(liveOauthToken, null, 2), 'utf8');
   fs.writeFileSync(options.storePath, JSON.stringify(store, null, 2), 'utf8');
 
-  return { dir, options, config, store, selected: { ...expiredSlot, credentials: store.accounts[0].credentials } };
+  return { dir, options, store, selected: { ...expiredSlot, credentials: store.accounts[0].credentials } };
 }
 
 function baseContext(fixtures, overrides = {}) {
   return {
     selected: fixtures.selected,
     store: fixtures.store,
-    config: fixtures.config,
     options: fixtures.options,
     deepCopy: io.deepCopy,
     writeLiveState: io.writeLiveState,
     writeStore: io.writeStore,
     assessCredentials,
-    detectClaudeSessions: () => ({ detected: true, count: 0 }),
+    detectAgySessions: () => ({ detected: true, count: 0 }),
     now: () => NOW,
     log: () => {},
     messages,
@@ -66,35 +52,26 @@ function baseContext(fixtures, overrides = {}) {
   };
 }
 
-test('pipeline: expired slot -> refresh 200 -> rotated token persisted to store BEFORE live write', async () => {
+test('pipeline: expired slot -> refresh 200 -> token persisted to store BEFORE live write', async () => {
   const fixtures = makeFixtures();
   const sequence = [];
 
   const context = baseContext(fixtures, {
-    refreshTokens: async () => ({
-      ok: true,
-      claudeAiOauth: {
-        accessToken: 'rotated-access-b',
-        refreshToken: 'rotated-refresh-b',
-        expiresAt: NOW + 28800000,
-        refreshTokenExpiresAt: NOW + 86400000,
-        subscriptionType: 'max',
-      },
-    }),
+    refreshToken: async () => ({ ok: true, token: { access_token: 'rotated-access-b', refresh_token: 'rotated-refresh-b', expiry: new Date(NOW + 3600000).toISOString(), token_type: 'Bearer' } }),
     writeStore: (store, options) => {
       sequence.push('store');
       io.writeStore(store, options);
     },
-    writeLiveState: (config, credentials, options) => {
+    writeLiveState: (snapshot, options) => {
       sequence.push('live');
       const persisted = JSON.parse(fs.readFileSync(options.storePath, 'utf8'));
-      const slot = persisted.accounts.find((e) => e.key === 'uuid:uuid-b');
+      const slot = persisted.accounts.find((e) => e.key === 'sub:sub-b');
       assert.strictEqual(
-        slot.credentials.claudeAiOauth.refreshToken,
+        slot.credentials.oauthToken.token.refresh_token,
         'rotated-refresh-b',
-        'rotated single-use refresh token must already be on disk in the store before the live swap',
+        'refreshed token must already be on disk in the store before the live swap',
       );
-      io.writeLiveState(config, credentials, options);
+      io.writeLiveState(snapshot, options);
     },
   });
 
@@ -104,25 +81,40 @@ test('pipeline: expired slot -> refresh 200 -> rotated token persisted to store 
   assert.strictEqual(result.refreshed, true);
   assert.deepStrictEqual(sequence, ['store', 'live']);
 
-  const liveCredentials = JSON.parse(fs.readFileSync(fixtures.options.credentialsPath, 'utf8'));
-  assert.strictEqual(liveCredentials.claudeAiOauth.accessToken, 'rotated-access-b');
-  assert.strictEqual(liveCredentials.sibling, 'must-survive');
-
-  const liveConfig = JSON.parse(fs.readFileSync(fixtures.options.configPath, 'utf8'));
-  assert.strictEqual(liveConfig.oauthAccount.accountUuid, 'uuid-b');
+  const liveState = io.readLiveState(fixtures.options);
+  assert.strictEqual(liveState.oauthToken.token.access_token, 'rotated-access-b');
 
   fs.rmSync(fixtures.dir, { recursive: true, force: true });
 });
 
-test('pipeline: refresh rejected with 400 (revoked) -> abort, no file writes at all', async () => {
+test('pipeline: refresh fails -> switch still proceeds with the stored (unrefreshed) token', async () => {
   const fixtures = makeFixtures();
-  const configBefore = fs.readFileSync(fixtures.options.configPath, 'utf8');
-  const credentialsBefore = fs.readFileSync(fixtures.options.credentialsPath, 'utf8');
+
+  const context = baseContext(fixtures, {
+    refreshToken: async () => ({ ok: false, code: 'network', message: 'unreachable' }),
+  });
+
+  const result = await runSwitchPipeline(context);
+
+  assert.strictEqual(result.switched, true, 'a failed best-effort refresh must not abort the switch');
+  assert.strictEqual(result.refreshed, false);
+  assert.strictEqual(result.refreshSkipped, true);
+
+  const liveState = io.readLiveState(fixtures.options);
+  assert.strictEqual(liveState.oauthToken.token.access_token, 'stale-access-b', 'unrefreshed token is restored as-is');
+
+  fs.rmSync(fixtures.dir, { recursive: true, force: true });
+});
+
+test('pipeline: no refresh token at all -> abort, no file writes at all', async () => {
+  const fixtures = makeFixtures();
+  fixtures.selected.credentials.oauthToken.token.refresh_token = undefined;
+  fixtures.store.accounts[0].credentials.oauthToken.token.refresh_token = undefined;
+  const oauthBefore = fs.readFileSync(fixtures.options.oauthTokenPath, 'utf8');
   const storeBefore = fs.readFileSync(fixtures.options.storePath, 'utf8');
   const sequence = [];
 
   const context = baseContext(fixtures, {
-    refreshTokens: async () => ({ ok: false, code: 'revoked', message: 'the stored refresh token was rejected' }),
     writeStore: () => { sequence.push('store'); },
     writeLiveState: () => { sequence.push('live'); },
   });
@@ -130,10 +122,9 @@ test('pipeline: refresh rejected with 400 (revoked) -> abort, no file writes at 
   const result = await runSwitchPipeline(context);
 
   assert.strictEqual(result.switched, false);
-  assert.strictEqual(result.abort.code, 'revoked');
+  assert.strictEqual(result.abort.code, 'refresh-expired');
   assert.deepStrictEqual(sequence, []);
-  assert.strictEqual(fs.readFileSync(fixtures.options.configPath, 'utf8'), configBefore);
-  assert.strictEqual(fs.readFileSync(fixtures.options.credentialsPath, 'utf8'), credentialsBefore);
+  assert.strictEqual(fs.readFileSync(fixtures.options.oauthTokenPath, 'utf8'), oauthBefore);
   assert.strictEqual(fs.readFileSync(fixtures.options.storePath, 'utf8'), storeBefore);
 
   fs.rmSync(fixtures.dir, { recursive: true, force: true });
@@ -141,12 +132,12 @@ test('pipeline: refresh rejected with 400 (revoked) -> abort, no file writes at 
 
 test('pipeline: valid slot -> no refresh call, straight switch', async () => {
   const fixtures = makeFixtures();
-  fixtures.selected.credentials.claudeAiOauth.expiresAt = NOW + 3600000;
-  fixtures.store.accounts[0].credentials.claudeAiOauth.expiresAt = NOW + 3600000;
+  fixtures.selected.credentials.oauthToken.token.expiry = new Date(NOW + 3600000).toISOString();
+  fixtures.store.accounts[0].credentials.oauthToken.token.expiry = new Date(NOW + 3600000).toISOString();
   let refreshCalls = 0;
 
   const context = baseContext(fixtures, {
-    refreshTokens: async () => { refreshCalls += 1; return { ok: false, code: 'network', message: 'should not be called' }; },
+    refreshToken: async () => { refreshCalls += 1; return { ok: false, code: 'network', message: 'should not be called' }; },
   });
 
   const result = await runSwitchPipeline(context);

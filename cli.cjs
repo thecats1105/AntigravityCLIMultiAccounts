@@ -11,13 +11,13 @@ function run(modulePath, forwardedArgs) {
 }
 
 function showHelp() {
-  console.log('Claude Code Multi-Account Switcher');
+  console.log('Antigravity CLI Multi-Account Switcher');
   console.log('');
   console.log('Usage:');
-  console.log('  claude-code-multi-accounts install');
-  console.log('  claude-code-multi-accounts uninstall');
-  console.log('  claude-code-multi-accounts switch [selector]');
-  console.log('  claude-code-multi-accounts sync');
+  console.log('  antigravity-cli-multi-accounts install');
+  console.log('  antigravity-cli-multi-accounts uninstall');
+  console.log('  antigravity-cli-multi-accounts switch [selector]');
+  console.log('  antigravity-cli-multi-accounts sync');
 }
 
 switch (command) {
@@ -28,10 +28,10 @@ switch (command) {
     run(path.join(__dirname, 'uninstall.cjs'), args);
     break;
   case 'switch':
-    run(path.join(__dirname, 'cc-switch.cjs'), ['--usage-command', 'cc-switch', ...args]);
+    run(path.join(__dirname, 'ag-switch.cjs'), ['--usage-command', 'ag-switch', ...args]);
     break;
   case 'sync':
-    run(path.join(__dirname, 'cc-switch.cjs'), ['sync', ...args]);
+    run(path.join(__dirname, 'ag-switch.cjs'), ['sync', ...args]);
     break;
   case 'help':
   case '--help':

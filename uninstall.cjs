@@ -27,68 +27,35 @@ function writeJson(filePath, value) {
 
 function uninstallCommands() {
   const home = os.homedir();
-  const installRoot = path.join(home, '.claude', 'multi-account-switch');
-  const commandsDir = path.join(home, '.claude', 'commands');
+  const geminiDir = path.join(home, '.gemini');
+  const installRoot = path.join(geminiDir, 'multi-account-switch');
   const userBinDir = process.platform === 'win32' ? path.join(home, 'bin') : path.join(home, '.local', 'bin');
-  const settingsPath = path.join(home, '.claude', 'settings.json');
-  const backupDir = path.join(home, '.claude', 'backups', 'multi-account-switch-installer');
-  const statuslineTargetPath = path.join(installRoot, 'hooks', 'statusline-target.json');
-  const hookCommand = process.platform === 'win32'
-    ? `node "${path.join(installRoot, 'bin', 'cc-switch.cjs')}" sync`
-    : `node '${path.join(installRoot, 'bin', 'cc-switch.cjs')}' sync`;
+  const hooksConfigPath = path.join(geminiDir, 'config', 'hooks.json');
+  const backupDir = path.join(installRoot, 'backups', 'installer');
+  const sessionStartTarget = path.join(installRoot, 'hooks', 'ag-session-start.cjs');
   const startupHookCommand = process.platform === 'win32'
-    ? `node "${path.join(installRoot, 'hooks', 'session-start.cjs')}"`
-    : `node '${path.join(installRoot, 'hooks', 'session-start.cjs')}'`;
-  const statusLineCommand = process.platform === 'win32'
-    ? `node "${path.join(installRoot, 'hooks', 'statusline.cjs')}"`
-    : `node '${path.join(installRoot, 'hooks', 'statusline.cjs')}'`;
+    ? `node "${sessionStartTarget}"`
+    : `node '${sessionStartTarget}'`;
 
-  if (fs.existsSync(settingsPath)) {
-    backupFile(settingsPath, backupDir);
-    const settings = readJson(settingsPath, {});
-    if (settings.hooks && Array.isArray(settings.hooks.Notification)) {
-      settings.hooks.Notification = settings.hooks.Notification
-        .map((entry) => {
-          if (!entry || entry.matcher !== 'auth_success' || !Array.isArray(entry.hooks)) {
-            return entry;
-          }
-          const nextHooks = entry.hooks.filter((hook) => !(hook && hook.type === 'command' && hook.command === hookCommand));
-          return nextHooks.length > 0 ? { ...entry, hooks: nextHooks } : null;
-        })
-        .filter(Boolean);
-    }
-    if (settings.hooks && Array.isArray(settings.hooks.SessionStart)) {
-      settings.hooks.SessionStart = settings.hooks.SessionStart
-        .map((entry) => {
-          if (!entry || entry.matcher !== 'startup' || !Array.isArray(entry.hooks)) {
-            return entry;
-          }
-          const nextHooks = entry.hooks.filter((hook) => !(hook && hook.type === 'command' && hook.command === startupHookCommand));
-          return nextHooks.length > 0 ? { ...entry, hooks: nextHooks } : null;
-        })
-        .filter(Boolean);
-    }
-
-    if (settings.statusLine?.type === 'command' && settings.statusLine.command === statusLineCommand) {
-      if (fs.existsSync(statuslineTargetPath)) {
-        settings.statusLine = readJson(statuslineTargetPath, settings.statusLine);
+  if (fs.existsSync(hooksConfigPath)) {
+    backupFile(hooksConfigPath, backupDir);
+    const hooksConfig = readJson(hooksConfigPath, {});
+    const group = hooksConfig['antigravity-multi-account-switch'];
+    if (group && Array.isArray(group.SessionStart)) {
+      group.SessionStart = group.SessionStart.filter(
+        (hook) => !(hook && hook.type === 'command' && hook.command === startupHookCommand),
+      );
+      if (group.SessionStart.length === 0) {
+        delete hooksConfig['antigravity-multi-account-switch'];
       } else {
-        delete settings.statusLine;
+        hooksConfig['antigravity-multi-account-switch'] = group;
       }
+      writeJson(hooksConfigPath, hooksConfig);
     }
-
-    writeJson(settingsPath, settings);
   }
 
-  for (const name of ['cc-switch', 'cc-sync-oauth', 'ccs', 'ccso', 'cc-switch.cmd', 'cc-sync-oauth.cmd', 'ccs.cmd', 'ccso.cmd']) {
+  for (const name of ['ag-switch', 'ag-sync-oauth', 'ags', 'agso', 'ag-switch.cmd', 'ag-sync-oauth.cmd', 'ags.cmd', 'agso.cmd']) {
     const target = path.join(userBinDir, name);
-    if (fs.existsSync(target)) {
-      fs.rmSync(target, { force: true });
-    }
-  }
-
-  for (const name of ['cc-switch.md', 'cc-sync-oauth.md']) {
-    const target = path.join(commandsDir, name);
     if (fs.existsSync(target)) {
       fs.rmSync(target, { force: true });
     }
@@ -98,7 +65,7 @@ function uninstallCommands() {
     fs.rmSync(installRoot, { recursive: true, force: true });
   }
 
-  console.log('Uninstalled multi-account switcher.');
+  console.log('Uninstalled Antigravity CLI Multi-Account Switcher.');
 }
 
 uninstallCommands();

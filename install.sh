@@ -11,6 +11,6 @@ node "$repo_root/install.cjs" "$@"
 
 user_bin_dir="$HOME/.local/bin"
 if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
-  install -m 755 "$user_bin_dir/cc-switch" /usr/local/bin/cc-switch
-  install -m 755 "$user_bin_dir/cc-sync-oauth" /usr/local/bin/cc-sync-oauth
+  install -m 755 "$user_bin_dir/ag-switch" /usr/local/bin/ag-switch
+  install -m 755 "$user_bin_dir/ag-sync-oauth" /usr/local/bin/ag-sync-oauth
 fi

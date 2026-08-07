@@ -1,113 +1,79 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { refreshTokens, mergeRefreshedTokens, OAUTH_CLIENT_ID } = require('../lib/auth/refresh.cjs');
+const { refreshToken, mergeRefreshedToken, CANDIDATE_CLIENT_IDS } = require('../lib/auth/refresh.cjs');
 
-const NOW = 1_800_000_000_000;
-
-function storedOauth() {
+function storedToken() {
   return {
-    accessToken: 'old-access',
-    refreshToken: 'old-refresh',
-    expiresAt: NOW - 1000,
-    refreshTokenExpiresAt: NOW + 999999,
-    scopes: ['user:inference', 'user:profile'],
-    subscriptionType: 'max',
-    rateLimitTier: 'default_claude_max_5x',
+    access_token: 'old-access',
+    refresh_token: 'old-refresh',
+    expiry: '2020-01-01T00:00:00Z',
+    token_type: 'Bearer',
   };
 }
 
-test('refreshTokens: 200 -> merged tokens, preserved metadata fields', async () => {
+test('refreshToken: 200 on first client id -> merged token, no second attempt', async () => {
   const calls = [];
-  const result = await refreshTokens(storedOauth(), {
-    now: () => NOW,
+  const result = await refreshToken(storedToken(), {
     httpPost: async (endpoint, body) => {
       calls.push({ endpoint, body });
       return {
         statusCode: 200,
-        body: JSON.stringify({
-          token_type: 'Bearer',
-          access_token: 'new-access',
-          refresh_token: 'new-refresh',
-          expires_in: 28800,
-        }),
+        body: JSON.stringify({ token_type: 'Bearer', access_token: 'new-access', refresh_token: 'new-refresh', expires_in: 3600 }),
       };
     },
   });
 
   assert.strictEqual(result.ok, true);
-  assert.strictEqual(result.claudeAiOauth.accessToken, 'new-access');
-  assert.strictEqual(result.claudeAiOauth.refreshToken, 'new-refresh');
-  assert.strictEqual(result.claudeAiOauth.expiresAt, NOW + 28800 * 1000);
-  assert.strictEqual(result.claudeAiOauth.refreshTokenExpiresAt, NOW + 999999);
-  assert.strictEqual(result.claudeAiOauth.subscriptionType, 'max');
-  assert.strictEqual(result.claudeAiOauth.rateLimitTier, 'default_claude_max_5x');
-  assert.deepStrictEqual(result.claudeAiOauth.scopes, ['user:inference', 'user:profile']);
-
+  assert.strictEqual(result.token.access_token, 'new-access');
+  assert.strictEqual(result.token.refresh_token, 'new-refresh');
   assert.strictEqual(calls.length, 1);
-  assert.deepStrictEqual(calls[0].body, {
-    grant_type: 'refresh_token',
-    refresh_token: 'old-refresh',
-    client_id: OAUTH_CLIENT_ID,
-  });
+  assert.strictEqual(calls[0].body.client_id, CANDIDATE_CLIENT_IDS[0]);
+  assert.strictEqual(calls[0].body.grant_type, 'refresh_token');
 });
 
-test('refreshTokens: 400 -> revoked, no fallback attempt', async () => {
-  let calls = 0;
-  const result = await refreshTokens(storedOauth(), {
-    httpPost: async () => {
-      calls += 1;
-      return { statusCode: 400, body: '{"error":"invalid_grant"}' };
+test('refreshToken: 400 on first client id -> tries second candidate', async () => {
+  const clientIdsSeen = [];
+  const result = await refreshToken(storedToken(), {
+    httpPost: async (_endpoint, body) => {
+      clientIdsSeen.push(body.client_id);
+      if (clientIdsSeen.length === 1) return { statusCode: 400, body: '{"error":"invalid_client"}' };
+      return { statusCode: 200, body: JSON.stringify({ access_token: 'second-access', expires_in: 100 }) };
     },
+  });
+
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(clientIdsSeen.length, 2);
+  assert.strictEqual(result.token.access_token, 'second-access');
+});
+
+test('refreshToken: both candidates rejected -> ok:false, revoked, never throws', async () => {
+  const result = await refreshToken(storedToken(), {
+    httpPost: async () => ({ statusCode: 401, body: '{"error":"invalid_grant"}' }),
   });
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.code, 'revoked');
-  assert.strictEqual(calls, 1);
 });
 
-test('refreshTokens: 429 -> rate-limited', async () => {
-  const result = await refreshTokens(storedOauth(), {
-    httpPost: async () => ({ statusCode: 429, body: '' }),
-  });
-  assert.strictEqual(result.ok, false);
-  assert.strictEqual(result.code, 'rate-limited');
-});
-
-test('refreshTokens: 404 on primary -> fallback endpoint succeeds', async () => {
-  const endpoints = [];
-  const result = await refreshTokens(storedOauth(), {
-    now: () => NOW,
-    httpPost: async (endpoint) => {
-      endpoints.push(endpoint);
-      if (endpoints.length === 1) return { statusCode: 404, body: '' };
-      return {
-        statusCode: 200,
-        body: JSON.stringify({ access_token: 'fallback-access', refresh_token: 'fallback-refresh', expires_in: 100 }),
-      };
-    },
-  });
-  assert.strictEqual(result.ok, true);
-  assert.strictEqual(endpoints.length, 2);
-  assert.strictEqual(result.claudeAiOauth.accessToken, 'fallback-access');
-});
-
-test('refreshTokens: network failure on both endpoints -> network error', async () => {
-  const result = await refreshTokens(storedOauth(), {
+test('refreshToken: network failure on both candidates -> ok:false, never throws', async () => {
+  const result = await refreshToken(storedToken(), {
     httpPost: async () => { throw new Error('ECONNRESET'); },
   });
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.code, 'network');
 });
 
-test('refreshTokens: unparsable 200 body -> protocol error', async () => {
-  const result = await refreshTokens(storedOauth(), {
-    httpPost: async () => ({ statusCode: 200, body: 'not json' }),
+test('refreshToken: missing refresh_token on input -> ok:false without any network call', async () => {
+  let calls = 0;
+  const result = await refreshToken({ access_token: 'a' }, {
+    httpPost: async () => { calls += 1; return { statusCode: 200, body: '{}' }; },
   });
   assert.strictEqual(result.ok, false);
-  assert.strictEqual(result.code, 'protocol');
+  assert.strictEqual(result.code, 'no-refresh-token');
+  assert.strictEqual(calls, 0);
 });
 
-test('mergeRefreshedTokens: missing refresh_token in response keeps old one', () => {
-  const merged = mergeRefreshedTokens(storedOauth(), { access_token: 'a2', expires_in: 10 }, NOW);
-  assert.strictEqual(merged.refreshToken, 'old-refresh');
-  assert.strictEqual(merged.accessToken, 'a2');
+test('mergeRefreshedToken: missing refresh_token in response keeps old one', () => {
+  const merged = mergeRefreshedToken(storedToken(), { access_token: 'a2', expires_in: 10 });
+  assert.strictEqual(merged.refresh_token, 'old-refresh');
+  assert.strictEqual(merged.access_token, 'a2');
 });

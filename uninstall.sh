@@ -10,5 +10,5 @@ repo_root="$(cd -- "$(dirname -- "$0")" && pwd)"
 node "$repo_root/uninstall.cjs" "$@"
 
 if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
-  rm -f /usr/local/bin/cc-switch /usr/local/bin/cc-sync-oauth
+  rm -f /usr/local/bin/ag-switch /usr/local/bin/ag-sync-oauth
 fi

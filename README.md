@@ -1,62 +1,62 @@
-# Claude Code Multi-Account Switcher
+# Antigravity CLI Multi-Account Switcher
 
-[![npm version](https://img.shields.io/npm/v/claude-code-multi-accounts?label=npm)](https://www.npmjs.com/package/claude-code-multi-accounts)
-[![npm downloads](https://img.shields.io/npm/dm/claude-code-multi-accounts)](https://www.npmjs.com/package/claude-code-multi-accounts)
-
-This project installs a local workaround for switching Claude Code OAuth accounts by keeping account snapshots in `~/.ClaudeCodeMultiAccounts.json` and writing only the active account back into Claude's live files when switching.
+This project installs a local workaround for switching Google [Antigravity CLI](https://antigravity.google/)
+(`agy`) accounts. Antigravity CLI has no native multi-account, login, or logout command - switching
+Google accounts today means fully re-authenticating through the browser every time. This tool keeps
+account snapshots in `~/.AntigravityCLIMultiAccounts.json` and writes only the active account's oauth
+token back into `agy`'s live credential file when switching.
 
 Supported user-facing commands:
-- `cc-switch`
-- `cc-switch <index>`
-- `cc-sync-oauth`
-- `ccs` (short alias for `cc-switch`)
-- `ccso` (short alias for `cc-sync-oauth`)
-- `/cc-switch`
-- `/cc-sync-oauth`
+- `ag-switch`
+- `ag-switch <index>`
+- `ag-switch --rename <index> [name]`
+- `ag-switch --remove <index>`
+- `ag-sync-oauth`
+- `ags` (short alias for `ag-switch`)
+- `agso` (short alias for `ag-sync-oauth`)
 
 Supported environments:
 - Windows (PowerShell/CMD/Git Bash)
 - Ubuntu WSL
 - Native macOS/Linux with Node.js
-- Claude chat shell mode via `!cc-switch` and `!cc-sync-oauth`
 
 Prerequisites:
 - Node.js 18+
-- Claude Code already installed and logged in at least once
+- Antigravity CLI (`agy`) already installed and logged in at least once
 
-Install:
+## Install
 
 **Recommended (via npm):**
 
 ```bash
-npx claude-code-multi-accounts install
+npx antigravity-cli-multi-accounts install
 ```
 
 **Manual (from source):**
 
 ```bash
-git clone https://github.com/Leuconoe/ClaudeCodeMultiAccounts.git
-cd ClaudeCodeMultiAccounts
+git clone https://github.com/thecats1105/AntigravityCLIMultiAccounts.git
+cd AntigravityCLIMultiAccounts
 ./install.cmd   # Windows
 ./install.sh    # macOS / Linux / WSL
 ```
 
 What install does:
-- copies the Node CLI into `~/.claude/multi-account-switch/bin`
-- installs `cc-switch`, `cc-sync-oauth`, `ccs`, and `ccso` wrapper commands
-- keeps stored account snapshots in `~/.ClaudeCodeMultiAccounts.json`
-- adds an `auth_success` hook entry to `~/.claude/settings.json`
-- adds a `SessionStart` reminder hook to `~/.claude/settings.json`
-- if `statusLine.command` already exists, wraps it and prepends `use !cc-switch / !ccs` to the existing HUD output
-- installs global Claude command wrappers in `~/.claude/commands`
-- creates backups under `~/.claude/backups/multi-account-switch-installer`
+- only runs if `~/.gemini/antigravity-cli` is detected on the machine (i.e. `agy` has been used at
+  least once); otherwise it prints a message and exits without doing anything
+- copies the Node CLI into `~/.gemini/multi-account-switch/bin`
+- installs `ag-switch`, `ag-sync-oauth`, `ags`, and `agso` wrapper commands
+- keeps stored account snapshots in `~/.AntigravityCLIMultiAccounts.json`
+- merges a `SessionStart` hook into `~/.gemini/config/hooks.json` (any other hook groups already
+  registered there are left untouched)
+- creates backups under `~/.gemini/multi-account-switch/backups`
 
-Uninstall:
+## Uninstall
 
 **Recommended (via npm):**
 
 ```bash
-npx claude-code-multi-accounts uninstall
+npx antigravity-cli-multi-accounts uninstall
 ```
 
 **Manual (from source):**
@@ -69,119 +69,105 @@ npx claude-code-multi-accounts uninstall
 ./uninstall.sh    # macOS / Linux / WSL
 ```
 
-Usage:
+## Usage
 
 ```bash
-cc-switch
-cc-switch 1
-cc-switch --rename 1 Personal
-cc-switch --rename 1
-cc-sync-oauth
-ccs
-ccso
+ag-switch
+ag-switch 1
+ag-switch --rename 1 Personal
+ag-switch --rename 1
+ag-sync-oauth
+ags
+agso
 ```
 
-`cc-switch --rename <index> <name>` sets a custom label for a stored account
-(handy when several accounts share the same Claude display name). The alias
-survives syncs. Omit `<name>` to clear it and fall back to the account's display
-name.
+`ag-switch --rename <index> <name>` sets a custom label for a stored account (handy when several
+accounts share the same display name). The alias survives syncs. Omit `<name>` to clear it and fall
+back to the account's email local part.
 
 Example shell output:
 
 ```text
-$ cc-switch
---- Usage ---
-5h remaining/reset: 78.0% / 2026. 4. 22. 2:00 PM
-7d remaining/reset: 94.0% / 2026. 4. 24. 9:00 AM
+$ ag-switch
+Available Antigravity accounts:
+  [0] alex.work <alex.work@example.invalid> | used:6m ago
+* [1] alex.personal <alex.personal@example.invalid> | used:just now
 
-Available Claude accounts:
-* [0] Alex Example | Pro | 5H:78%(~2h 44min) | 7D:94%(1D 21h) | used:3m ago
-  [1] Taylor Example | Team Std | 5H:71%(now) | 7D:81%(1D 21h) | used:19h ago
-  [2] Jordan Example | Team Prem | 5H:0%(now) | 7D:65%(2D 5h) | used:1d ago
-
-Run cc-switch <index> to make one of these stored entries the active Claude account.
-Run cc-switch --remove <index> to remove a stored account.
+Run ag-switch <index> to make one of these stored entries the active Antigravity account.
+Run ag-switch --remove <index> to remove a stored account.
 ```
 
 ```text
-$ cc-switch 1
-Switched active account to [1] Taylor Example <taylor@example.invalid> (Teams).
+$ ag-switch 0
+Switched active account to [0] alex.work <alex.work@example.invalid>.
+
+Note: Restart Antigravity CLI (agy) to apply the account change.
 
 Stored account list:
-  [0] Alex Example | Pro | 5H:78%(?) | 7D:94%(?) | used:19m ago
-* [1] Taylor Example | Team Std | 5H:71%(?) | 7D:81%(?) | used:just now
-  [2] Jordan Example | Team Prem | 5H:0%(?) | 7D:65%(?) | used:1d ago
-```
-
-Output columns:
-- `5H`: Current or cached 5-hour remaining quota and reset estimate
-- `7D`: Current or cached 7-day remaining quota and reset estimate
-- `used`: When the account was last selected, or when Claude startup refreshed the active account marker
-- Top usage block: live `5h remaining/reset` and `7d remaining/reset` values fetched from Claude when available
-
-Claude chat shell usage:
-
-```bash
-!cc-switch
-!cc-switch 1
-!cc-sync-oauth
-!ccs
-!ccso
-```
-
-Claude `/command` usage:
-
-```text
-/cc-switch
-/cc-switch 1
-/cc-sync-oauth
-```
-
-`/cc-switch` currently still goes through Claude's command-processing path, so `!cc-switch` remains the primary deterministic execution path. The slash command is installed now so it can benefit from future improvements in Claude's command handling.
-
-Claude startup reminder:
-
-```text
-Claude Code Multi-Account Switcher is available.
-Use !cc-switch or !ccs to list/switch accounts.
-Use !cc-sync-oauth or !ccso to sync the active account into oauthList.
+* [0] alex.work <alex.work@example.invalid> | used:just now
+  [1] alex.personal <alex.personal@example.invalid> | used:6m ago
 ```
 
 Platform notes:
-- Windows installs `cc-switch.cmd` and `cc-sync-oauth.cmd` into `~/bin`, plus Git Bash-friendly `cc-switch` and `cc-sync-oauth` wrappers in the same directory.
-- Short aliases `ccs` and `ccso` are installed alongside the full command names.
+- Windows installs `ag-switch.cmd` and `ag-sync-oauth.cmd` into `~/bin`, plus Git Bash-friendly
+  `ag-switch` and `ag-sync-oauth` wrappers in the same directory.
+- Short aliases `ags` and `agso` are installed alongside the full command names.
 - Native macOS/Linux installs commands into `~/.local/bin`.
 - WSL also uses the Unix shell wrappers.
 - If a shell says `command not found` right after install, restart the shell or run `hash -r` once.
 
-Behavior notes:
-- The tool stores metadata and credential snapshots in `~/.ClaudeCodeMultiAccounts.json`.
-- `cc-sync-oauth` imports the current live account into that store.
-- Switching writes only the active `oauthAccount` back into `~/.claude.json` and the active credential snapshot back into `~/.claude/.credentials.json`.
-- It creates backups before writing live files or the store file.
-- Stored account ordering is stable.
-- If a stored `displayName` is already corrupted, output falls back to the email local part.
-- The displayed plan type is a best-effort inference from the available account fields and credential snapshot.
-- The `reset:` column shows rate limit countdown for the current account, or a 7-day window estimate for others.
-- Usage info from the Claude API is shown before the account list when rate limited.
+## Behavior notes
 
-Warnings:
-- This is a local workaround, not an official Claude plugin.
-- It still mutates internal Claude live files when switching accounts, but it no longer uses `~/.claude.json` as the primary multi-account store.
-- Native macOS/Linux support is implemented, but still needs real-host validation beyond Windows/WSL testing.
-- npm packaging is prepared, but npm registry publish still requires npm authentication.
+- Stored account snapshots live in `~/.AntigravityCLIMultiAccounts.json`, keyed by the Google
+  account's stable `sub` id (fetched from Google's userinfo endpoint) - the closest analog to an
+  account UUID Google exposes for this.
+- Switching only writes one live file: `~/.gemini/antigravity-cli/antigravity-oauth-token`. Two other
+  files were originally assumed to also carry account identity -
+  `~/.gemini/google_accounts.json` (an `active` email field) and `~/.gemini/google_account_id` - but a
+  real second-account login test showed **both stay stale and don't track the actual live login**, so
+  they are deliberately left untouched. Every `sync`/`list`/`switch` instead calls
+  `https://www.googleapis.com/oauth2/v3/userinfo` with the live access token to reliably determine
+  which account it belongs to. This means those commands require network access.
+- It never touches `~/.gemini/antigravity-cli/settings.json`, conversation history, caches, or brain
+  files - only the oauth token.
+- It creates backups before writing the live file or the store file (latest 3 kept per file).
+- The `SessionStart` hook refreshes the "last used" timestamp and prints a reminder at the start of
+  each `agy` session.
+- Token refresh before restoring a stale account is attempted best-effort. Unlike a naive
+  implementation, a failed refresh does **not** abort the switch - it restores the stored token as-is
+  and warns, since the refresh implementation itself is unverified (see Warnings below).
 
-After this:
-- npm / `npx` release refresh for `v0.3.7`
-- non-AI hook execution path for `/cc-switch` if Claude exposes a direct command hook in the future
-- improve plan type detection beyond the current best-effort inference
+## Warnings
+
+- This is a local workaround, not an official Google/Antigravity tool.
+- Proactive OAuth token refresh uses `https://oauth2.googleapis.com/token` with an OAuth client id
+  recovered from strings in the `agy`/`antigravity` binary; there is no confirmation this client id
+  (or the lack of a client secret) actually works for a refresh grant. Treat refresh failures as
+  expected until this is verified - the switch still proceeds using the unrefreshed token.
+- No usage/quota display - there's no known public equivalent of a per-account quota API for
+  Antigravity/Cloud Code Assist.
+- No slash-command (`/ag-switch`) support - `agy`'s slash commands appear to route through its
+  `skills/` system rather than a flat command directory, and this hasn't been investigated yet.
+- Windows/macOS are untested for the live-file swap. On Linux/WSL, `agy` falls back to file-based
+  token storage when the OS keyring is unavailable (confirmed on this project's dev machine); on
+  macOS/Windows the keyring may succeed instead, which could make the live file this tool watches
+  stale or unused. If that turns out to be the case, this tool would need to shell out to the native
+  keyring (Keychain/Credential Manager) instead of/in addition to the file above.
+
+## Credits
+
+This project's architecture (account snapshot store, atomic file writes with backups, single-active-account
+swap model, hook-based session reminders) is ported from
+[**Leuconoe/ClaudeCodeMultiAccounts**](https://github.com/Leuconoe/ClaudeCodeMultiAccounts), the
+original Claude Code multi-account switcher. All credit for that design goes to its author -
+this project just retargets the same approach at Google Antigravity CLI.
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=Leuconoe%2FClaudeCodeMultiAccounts&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=thecats1105%2FAntigravityCLIMultiAccounts&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=Leuconoe/ClaudeCodeMultiAccounts&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=Leuconoe/ClaudeCodeMultiAccounts&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=Leuconoe/ClaudeCodeMultiAccounts&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=thecats1105/AntigravityCLIMultiAccounts&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=thecats1105/AntigravityCLIMultiAccounts&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=thecats1105/AntigravityCLIMultiAccounts&type=date&legend=top-left" />
  </picture>
 </a>
