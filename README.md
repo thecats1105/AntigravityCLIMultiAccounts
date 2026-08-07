@@ -147,16 +147,23 @@ Behavior notes:
 - It creates backups before writing the live file or the store file (latest 3 kept per file).
 - The `SessionStart` hook refreshes the "last used" timestamp and prints a reminder at the start of
   each `agy` session.
-- Token refresh before restoring a stale account is best-effort - a failed refresh does not abort the
-  switch, it restores the stored token as-is and warns (see Warnings).
+- Token refresh before restoring a stale account, or before resolving the live account's identity, is
+  best-effort - a failed refresh does not abort the switch, it proceeds with the existing token and
+  warns (see Warnings). If the _live_ token is expired and can't be refreshed, commands fail with a
+  clear message telling you to run `agy` once (which refreshes its own live token via a working path)
+  and try again.
 - Usage display calls `cloudcode-pa.googleapis.com`'s quota-summary endpoint, the same private API
   `agy` itself uses. It's always best-effort and never blocks `list`/`switch`/`sync`.
 
 Warnings:
 
 - This is a local workaround, not an official Google/Antigravity tool.
-- Proactive OAuth token refresh uses an OAuth client id recovered from the `agy` binary; whether it
-  actually works for a refresh grant is unverified. The switch still proceeds on a refresh failure.
+- Proactive OAuth token refresh uses OAuth client ids recovered from the `agy` binary, and is
+  confirmed **not to work**: Google rejects both candidates with "client_secret is missing", and no
+  secret is embedded in the binary as a plain string. agy clearly refreshes its own live token some
+  other way. Every command still proceeds/degrades gracefully on a refresh failure - a stored account
+  switch restores the token as-is, and an expired _live_ session tells you to run `agy` once instead
+  of crashing with a raw 401.
 - Usage display uses an undocumented, reverse-engineered endpoint found via `strings` on the `agy`
   binary. The response shape was confirmed against a real account, but Google could change it at any
   time; if that happens the usage columns just stop appearing rather than erroring.

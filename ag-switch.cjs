@@ -179,14 +179,18 @@ async function main() {
 
   try {
     const liveState = readLiveState(options);
+
     // The live account's identity cannot be read from a local file -
     // google_accounts.json/google_account_id were tested and don't track
-    // the real login state. Resolve it against Google directly instead.
-    liveState.identity =
-      options.liveIdentityOverride ||
-      (await authIdentity.fetchLiveIdentity(
-        liveState.oauthToken?.token?.access_token,
-      ));
+    // the real login state. Resolve it against Google directly instead,
+    // with a best-effort token refresh first (see resolveLiveIdentity).
+    liveState.identity = await authIdentity.resolveLiveIdentity(liveState, {
+      liveIdentityOverride: options.liveIdentityOverride,
+      assessCredentials: authGuard.assessCredentials,
+      refreshToken: authRefresh.refreshToken,
+      writeLiveState,
+      options,
+    });
 
     const existingStore = normalizeStore(
       readJsonIfExists(options.storePath, {
