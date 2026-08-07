@@ -1,5 +1,8 @@
 # Antigravity CLI Multi-Account Switcher
 
+[![npm version](https://img.shields.io/npm/v/antigravity-cli-multi-accounts?label=npm)](https://www.npmjs.com/package/antigravity-cli-multi-accounts)
+[![npm downloads](https://img.shields.io/npm/dm/antigravity-cli-multi-accounts)](https://www.npmjs.com/package/antigravity-cli-multi-accounts)
+
 This project installs a local workaround for switching Google [Antigravity CLI](https://antigravity.google/)
 (`agy`) accounts. Antigravity CLI has no native multi-account, login, or logout command - switching
 Google accounts today means fully re-authenticating through the browser every time. This tool keeps
