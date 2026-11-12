@@ -1,6 +1,6 @@
 {
   "name": "antigravity-cli-multi-accounts",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Installer and CLI for switching Google Antigravity CLI (agy) accounts across Windows, WSL, and Unix shells.",
   "license": "MIT",
   "type": "commonjs",
