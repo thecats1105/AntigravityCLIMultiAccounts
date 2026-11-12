@@ -5,6 +5,7 @@ const {
   formatUsageDetail,
   toUsageSnapshot,
   getUsageColumns,
+  getEffectiveWindows,
   refreshStoredUsageSnapshots,
 } = require("../lib/usage/format.cjs");
 
@@ -194,6 +195,74 @@ test("toUsageSnapshot: unrecognized shape -> null (no data to persist)", () => {
 
 test("getUsageColumns: no snapshot yet -> null", () => {
   assert.strictEqual(getUsageColumns({}), null);
+});
+
+test("getEffectiveWindows: a window past its reset time is back to 100%", () => {
+  const now = Date.now();
+  const past = new Date(now - 60000).toISOString();
+  const future = new Date(now + 3600000).toISOString();
+  const { fiveHour, weekly } = getEffectiveWindows(
+    {
+      fiveHour: { remaining: "12%", resetsAt: past },
+      weekly: { remaining: "40%", resetsAt: future },
+    },
+    now,
+  );
+  assert.strictEqual(fiveHour.remaining, "100%");
+  assert.strictEqual(weekly.remaining, "40%");
+});
+
+test("getEffectiveWindows: an exhausted weekly window also blocks the 5h window", () => {
+  const now = Date.now();
+  const future = new Date(now + 3600000).toISOString();
+  const { fiveHour, weekly } = getEffectiveWindows(
+    {
+      fiveHour: { remaining: "80%", resetsAt: future },
+      weekly: { remaining: "0%", resetsAt: future },
+    },
+    now,
+  );
+  assert.strictEqual(weekly.remaining, "0%");
+  assert.strictEqual(fiveHour.remaining, "0%");
+});
+
+test("getEffectiveWindows: a rolled-over weekly window no longer blocks the 5h window", () => {
+  const now = Date.now();
+  const past = new Date(now - 60000).toISOString();
+  const future = new Date(now + 3600000).toISOString();
+  const { fiveHour, weekly } = getEffectiveWindows(
+    {
+      fiveHour: { remaining: "80%", resetsAt: future },
+      weekly: { remaining: "0%", resetsAt: past },
+    },
+    now,
+  );
+  assert.strictEqual(weekly.remaining, "100%");
+  assert.strictEqual(fiveHour.remaining, "80%");
+});
+
+test("getEffectiveWindows: non-percentage amounts are left untouched; missing category is empty", () => {
+  const now = Date.now();
+  const past = new Date(now - 60000).toISOString();
+  const { fiveHour } = getEffectiveWindows(
+    { fiveHour: { remaining: "5 left", resetsAt: past } },
+    now,
+  );
+  assert.strictEqual(fiveHour.remaining, "5 left");
+  assert.deepStrictEqual(getEffectiveWindows(undefined, now), {
+    fiveHour: undefined,
+    weekly: undefined,
+  });
+});
+
+test("getUsageColumns: shows the rolled-over window as full instead of the stale fetched value", () => {
+  const past = new Date(Date.now() - 60000).toISOString();
+  const columns = getUsageColumns({
+    usageSnapshot: {
+      gemini: { fiveHour: { remaining: "3%", resetsAt: past } },
+    },
+  });
+  assert.deepStrictEqual(columns, ["Gemini 5H:100% (now)"]);
 });
 
 test("refreshStoredUsageSnapshots: updates snapshots for accounts with an access token, skips others, never throws on per-account failure", async () => {

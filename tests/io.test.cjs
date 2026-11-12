@@ -6,6 +6,7 @@ const path = require("node:path");
 const {
   readLiveState,
   writeLiveState,
+  verifyLiveState,
   writeStore,
 } = require("../lib/store/io.cjs");
 
@@ -96,5 +97,43 @@ test("writeStore: writes and backs up the account store", () => {
       .some((name) => name.startsWith("store.json.")),
   );
 
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("verifyLiveState: ok when the live token file holds the expected access token", () => {
+  const dir = tempDir();
+  const options = makeOptions(dir);
+  writeLiveState(
+    { oauthToken: { token: { access_token: "a-1", refresh_token: "r-1" } } },
+    options,
+  );
+
+  assert.deepStrictEqual(verifyLiveState(options, { accessToken: "a-1" }), {
+    ok: true,
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("verifyLiveState: fails when something rewrote the live token after the swap", () => {
+  const dir = tempDir();
+  const options = makeOptions(dir);
+  writeLiveState(
+    { oauthToken: { token: { access_token: "someone-else", refresh_token: "r" } } },
+    options,
+  );
+
+  const result = verifyLiveState(options, { accessToken: "a-1" });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.reason, /no longer matches/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("verifyLiveState: fails (never throws) when the live file is unreadable", () => {
+  const dir = tempDir();
+  const options = makeOptions(dir);
+
+  const result = verifyLiveState(options, { accessToken: "a-1" });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.reason, /could not re-read/);
   fs.rmSync(dir, { recursive: true, force: true });
 });

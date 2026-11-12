@@ -18,6 +18,7 @@ const usageFetch = require("./lib/usage/fetch.cjs");
 const usageFormat = require("./lib/usage/format.cjs");
 const usageCache = require("./lib/usage/cache.cjs");
 const usageAction = require("./lib/actions/usage.cjs");
+const storeLock = require("./lib/store/lock.cjs");
 
 const {
   getDefaultOauthTokenPath,
@@ -27,6 +28,7 @@ const {
   deepCopy,
   readLiveState,
   writeLiveState,
+  verifyLiveState,
   writeStore,
   ensureDir,
 } = storeIo;
@@ -174,168 +176,180 @@ function parseArgs(argv, settings) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2), usageCache.readSettings());
-  const formatAccountSummaryWithUsage = (items) =>
-    formatAccountSummary(items, { showUsage: options.showUsage });
 
   try {
-    const liveState = readLiveState(options);
-
-    // The live account's identity cannot be read from a local file -
-    // google_accounts.json/google_account_id were tested and don't track
-    // the real login state. Resolve it against Google directly instead,
-    // with a best-effort token refresh first (see resolveLiveIdentity).
-    liveState.identity = await authIdentity.resolveLiveIdentity(liveState, {
-      liveIdentityOverride: options.liveIdentityOverride,
-      assessCredentials: authGuard.assessCredentials,
-      refreshToken: authRefresh.refreshToken,
-      writeLiveState,
-      options,
-    });
-
-    const existingStore = normalizeStore(
-      readJsonIfExists(options.storePath, {
-        version: STORE_VERSION,
-        accounts: [],
-      }),
-      STORE_VERSION,
-    );
-
-    if (options.syncOnly) {
-      await runSyncAction(existingStore, liveState, {
-        syncStoreFromLive,
-        deepCopy,
-        storeVersion: STORE_VERSION,
-        writeStore,
-        options,
-        path,
-        fetchUsage: usageFetch.fetchUsage,
-        formatUsageDetail: usageFormat.formatUsageDetail,
-      });
-      return;
-    }
-
-    if (options.touchCurrentOnly) {
-      const syncedTouch = syncStoreFromLive(
-        existingStore,
-        liveState,
-        deepCopy,
-        STORE_VERSION,
-      );
-      const storeTouch = syncedTouch.store;
-      const idx = storeTouch.accounts.findIndex(
-        (e) => e.key === syncedTouch.key,
-      );
-      if (idx >= 0) {
-        storeTouch.accounts[idx].lastUsedAt = new Date().toISOString();
-      }
-      writeStore(storeTouch, options);
-      return;
-    }
-
-    if (options.removeOnly) {
-      runRemoveAction(existingStore, options.removeIndex, {
-        removeStoredAccount,
-        writeStore,
-        options,
-        getEntryLabel: getEntryLabelUi,
-        getRemainingAccountsHeading,
-      });
-      return;
-    }
-
-    if (options.renameOnly) {
-      runRenameAction(
-        existingStore,
-        options.renameIndex,
-        options.renameAliasParts.join(" "),
-        {
-          writeStore,
-          options,
-          liveState,
-          getEntryLabel: getEntryLabelUi,
-          getDisplayAccounts,
-          getStoredAccountsHeading,
-          formatAccountSummary: formatAccountSummaryWithUsage,
-        },
-      );
-      return;
-    }
-
-    const synced = syncStoreFromLive(
-      existingStore,
-      liveState,
-      deepCopy,
-      STORE_VERSION,
-    );
-    if (synced.warning) {
-      console.log(outputMessages.getSyncSkippedWarning(synced.warning));
-    }
-    const store = synced.store;
-    const currentMetadata = {
-      sub: liveState.identity.sub,
-      emailAddress: liveState.identity.email,
-    };
-    const accounts = getDisplayAccounts(store, currentMetadata);
-
-    if (options.usageOnly) {
-      await runUsageAction({
-        store,
-        currentKey: getAccountKey(currentMetadata),
-        fetchUsage: usageFetch.fetchUsage,
-        formatUsageDetail: usageFormat.formatUsageDetail,
-        refreshStoredUsageSnapshots: usageFormat.refreshStoredUsageSnapshots,
-        writeStore,
-        options,
-      });
-      return;
-    }
-
-    if (!options.selector) {
-      await runListAction({
-        synced,
-        store,
-        liveState,
-        options,
-        writeStore,
-        formatAccountSummary: formatAccountSummaryWithUsage,
-        getDisplayAccounts,
-        getListGuidance,
-        getAvailableAccountsHeading,
-        path,
-        refreshStoredUsageSnapshots: usageFormat.refreshStoredUsageSnapshots,
-        fetchUsage: usageFetch.fetchUsage,
-        getAccountKey,
-        formatUsageDetail: usageFormat.formatUsageDetail,
-      });
-      return;
-    }
-
-    const selected = findSelection(accounts, options.selector);
-    await runSwitchAction({
-      selected,
-      store,
-      options,
-      deepCopy,
-      writeLiveState,
-      writeStore,
-      assessCredentials: authGuard.assessCredentials,
-      refreshToken: authRefresh.refreshToken,
-      detectAgySessions: procSessions.detectAgySessions,
-      now: () => Date.now(),
-      messages: outputMessages,
-      getDisplayAccounts,
-      getEntryLabel: getEntryLabelUi,
-      getRestartNotice,
-      getStoredAccountsHeading,
-      formatAccountSummary: formatAccountSummaryWithUsage,
-      refreshStoredUsageSnapshots: usageFormat.refreshStoredUsageSnapshots,
-      fetchUsage: usageFetch.fetchUsage,
-      getAccountKey,
+    // Everything below reads-then-writes the token and store files, so the
+    // lock is taken before the first read: a concurrent invocation (e.g. the
+    // SessionStart hook) may have rotated or rewritten them since we last
+    // looked.
+    await storeLock.withLock({}, async () => {
+      await run(options);
     });
   } catch (error) {
     console.log(`Switch failed: ${error.message}`);
     process.exitCode = 1;
   }
+}
+
+async function run(options) {
+  const formatAccountSummaryWithUsage = (items) =>
+    formatAccountSummary(items, { showUsage: options.showUsage });
+
+  const liveState = readLiveState(options);
+
+  // The live account's identity cannot be read from a local file -
+  // google_accounts.json/google_account_id were tested and don't track
+  // the real login state. Resolve it against Google directly instead,
+  // with a best-effort token refresh first (see resolveLiveIdentity).
+  liveState.identity = await authIdentity.resolveLiveIdentity(liveState, {
+    liveIdentityOverride: options.liveIdentityOverride,
+    assessCredentials: authGuard.assessCredentials,
+    refreshToken: authRefresh.refreshToken,
+    writeLiveState,
+    options,
+  });
+
+  const existingStore = normalizeStore(
+    readJsonIfExists(options.storePath, {
+      version: STORE_VERSION,
+      accounts: [],
+    }),
+    STORE_VERSION,
+  );
+
+  if (options.syncOnly) {
+    await runSyncAction(existingStore, liveState, {
+      syncStoreFromLive,
+      deepCopy,
+      storeVersion: STORE_VERSION,
+      writeStore,
+      options,
+      path,
+      fetchUsage: usageFetch.fetchUsage,
+      formatUsageDetail: usageFormat.formatUsageDetail,
+    });
+    return;
+  }
+
+  if (options.touchCurrentOnly) {
+    const syncedTouch = syncStoreFromLive(
+      existingStore,
+      liveState,
+      deepCopy,
+      STORE_VERSION,
+    );
+    const storeTouch = syncedTouch.store;
+    const idx = storeTouch.accounts.findIndex(
+      (e) => e.key === syncedTouch.key,
+    );
+    if (idx >= 0) {
+      storeTouch.accounts[idx].lastUsedAt = new Date().toISOString();
+    }
+    writeStore(storeTouch, options);
+    return;
+  }
+
+  if (options.removeOnly) {
+    runRemoveAction(existingStore, options.removeIndex, {
+      removeStoredAccount,
+      writeStore,
+      options,
+      getEntryLabel: getEntryLabelUi,
+      getRemainingAccountsHeading,
+    });
+    return;
+  }
+
+  if (options.renameOnly) {
+    runRenameAction(
+      existingStore,
+      options.renameIndex,
+      options.renameAliasParts.join(" "),
+      {
+        writeStore,
+        options,
+        liveState,
+        getEntryLabel: getEntryLabelUi,
+        getDisplayAccounts,
+        getStoredAccountsHeading,
+        formatAccountSummary: formatAccountSummaryWithUsage,
+      },
+    );
+    return;
+  }
+
+  const synced = syncStoreFromLive(
+    existingStore,
+    liveState,
+    deepCopy,
+    STORE_VERSION,
+  );
+  if (synced.warning) {
+    console.log(outputMessages.getSyncSkippedWarning(synced.warning));
+  }
+  const store = synced.store;
+  const currentMetadata = {
+    sub: liveState.identity.sub,
+    emailAddress: liveState.identity.email,
+  };
+  const accounts = getDisplayAccounts(store, currentMetadata);
+
+  if (options.usageOnly) {
+    await runUsageAction({
+      store,
+      currentKey: getAccountKey(currentMetadata),
+      fetchUsage: usageFetch.fetchUsage,
+      formatUsageDetail: usageFormat.formatUsageDetail,
+      refreshStoredUsageSnapshots: usageFormat.refreshStoredUsageSnapshots,
+      writeStore,
+      options,
+    });
+    return;
+  }
+
+  if (!options.selector) {
+    await runListAction({
+      synced,
+      store,
+      liveState,
+      options,
+      writeStore,
+      formatAccountSummary: formatAccountSummaryWithUsage,
+      getDisplayAccounts,
+      getListGuidance,
+      getAvailableAccountsHeading,
+      path,
+      refreshStoredUsageSnapshots: usageFormat.refreshStoredUsageSnapshots,
+      fetchUsage: usageFetch.fetchUsage,
+      getAccountKey,
+      formatUsageDetail: usageFormat.formatUsageDetail,
+    });
+    return;
+  }
+
+  const selected = findSelection(accounts, options.selector);
+  await runSwitchAction({
+    selected,
+    store,
+    options,
+    deepCopy,
+    writeLiveState,
+    verifyLiveState,
+    writeStore,
+    assessCredentials: authGuard.assessCredentials,
+    refreshToken: authRefresh.refreshToken,
+    detectAgySessions: procSessions.detectAgySessions,
+    now: () => Date.now(),
+    messages: outputMessages,
+    getDisplayAccounts,
+    getEntryLabel: getEntryLabelUi,
+    getRestartNotice,
+    getStoredAccountsHeading,
+    formatAccountSummary: formatAccountSummaryWithUsage,
+    refreshStoredUsageSnapshots: usageFormat.refreshStoredUsageSnapshots,
+    fetchUsage: usageFetch.fetchUsage,
+    getAccountKey,
+  });
 }
 
 main();

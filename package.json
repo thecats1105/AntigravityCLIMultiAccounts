@@ -17,6 +17,7 @@
     "LICENSE",
     "lib/store/io.cjs",
     "lib/store/accounts.cjs",
+    "lib/store/lock.cjs",
     "lib/auth/guard.cjs",
     "lib/auth/refresh.cjs",
     "lib/auth/identity.cjs",
@@ -60,6 +61,6 @@
   },
   "scripts": {
     "pack:check": "npm pack --dry-run",
-    "test": "node --test tests/guard.test.cjs tests/refresh.test.cjs tests/identity.test.cjs tests/io.test.cjs tests/accounts.test.cjs tests/pipeline.test.cjs tests/cli-switch.test.cjs tests/usage-fetch.test.cjs tests/usage-format.test.cjs"
+    "test": "node --test tests/guard.test.cjs tests/refresh.test.cjs tests/identity.test.cjs tests/io.test.cjs tests/lock.test.cjs tests/accounts.test.cjs tests/pipeline.test.cjs tests/cli-switch.test.cjs tests/usage-fetch.test.cjs tests/usage-format.test.cjs"
   }
 }

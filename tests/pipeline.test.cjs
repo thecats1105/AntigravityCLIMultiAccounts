@@ -70,6 +70,7 @@ function baseContext(fixtures, overrides = {}) {
     options: fixtures.options,
     deepCopy: io.deepCopy,
     writeLiveState: io.writeLiveState,
+    verifyLiveState: io.verifyLiveState,
     writeStore: io.writeStore,
     assessCredentials,
     detectAgySessions: () => ({ detected: true, count: 0 }),
@@ -214,6 +215,25 @@ test("pipeline: valid slot -> no refresh call, straight switch", async () => {
   assert.strictEqual(result.switched, true);
   assert.strictEqual(result.refreshed, false);
   assert.strictEqual(refreshCalls, 0);
+
+  fs.rmSync(fixtures.dir, { recursive: true, force: true });
+});
+
+test("pipeline: live token rewritten right after the swap -> verify-failed abort, not a false success", async () => {
+  const fixtures = makeFixtures();
+  const context = baseContext(fixtures, {
+    refreshToken: async () => ({ ok: false, code: "network", message: "offline" }),
+    verifyLiveState: () => ({ ok: false, reason: "the live oauth token no longer matches" }),
+  });
+
+  const result = await runSwitchPipeline(context);
+
+  assert.strictEqual(result.switched, false);
+  assert.strictEqual(result.abort.code, "verify-failed");
+  assert.match(
+    messages.getSwitchAbortedLines(result.abort, "B", "ag-switch").join("\n"),
+    /could not be confirmed/,
+  );
 
   fs.rmSync(fixtures.dir, { recursive: true, force: true });
 });
